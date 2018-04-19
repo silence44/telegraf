@@ -29,6 +29,7 @@ import (
 
 	"github.com/influxdata/toml"
 	"github.com/influxdata/toml/ast"
+	"github.com/influxdata/telegraf/plugins/storages"
 )
 
 var (
@@ -673,6 +674,20 @@ func (c *Config) LoadConfig(path string) error {
 						pluginName, path)
 				}
 			}
+		case "storages":
+			for pluginName, pluginVal := range subTable.Fields {
+				switch pluginSubTable := pluginVal.(type) {
+				case []*ast.Table:
+					for _, t := range pluginSubTable {
+						if err = c.addStorage(pluginName, t); err != nil {
+							return fmt.Errorf("Error parsing %s, %s", path, err)
+						}
+					}
+				default:
+					return fmt.Errorf("Unsupported config format: %s, file %s",
+						pluginName, path)
+				}
+			}
 		// Assume it's an input input for legacy config file support if no other
 		// identifiers are present
 		default:
@@ -740,6 +755,24 @@ func (c *Config) addAggregator(name string, table *ast.Table) error {
 	}
 
 	c.Aggregators = append(c.Aggregators, models.NewRunningAggregator(aggregator, conf))
+	return nil
+}
+
+func (c *Config) addStorage(name string, table *ast.Table) error {
+	creator, ok := storages.Storages[name]
+
+	if !ok {
+		return fmt.Errorf("undefined but requested storage: %s", name)
+	}
+
+	storage := creator()
+
+	if err := toml.UnmarshalTable(table, storage); err != nil {
+		return err
+	}
+
+	telegraf.GlobalStorage.Add(name, storage)
+
 	return nil
 }
 
